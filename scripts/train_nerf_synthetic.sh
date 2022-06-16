@@ -12,7 +12,7 @@ declare -a scene_names=(
     "ship")
 
 for scene_name in ${scene_names[@]}; do
-    python main_nerf.py data/nerf_synthetic/$scene_name \
+    python main_nerf.py data/nerf/nerf_synthetic/$scene_name \
     --workspace workspace/$scene_name \
     --mode blender \
     --bound 1.0 \
