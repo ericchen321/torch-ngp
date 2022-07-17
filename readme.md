@@ -3,11 +3,31 @@
 This repository contains:
 * A pytorch implementation of the SDF and NeRF part (grid encoder, density grid ray sampler) in [instant-ngp](https://github.com/NVlabs/instant-ngp), as described in [_Instant Neural Graphics Primitives with a Multiresolution Hash Encoding_](https://nvlabs.github.io/instant-ngp/assets/mueller2022instant.pdf).
 * A pytorch implementation of [TensoRF](https://github.com/apchenstu/TensoRF), as described in [_TensoRF: Tensorial Radiance Fields_](https://arxiv.org/abs/2203.09517), adapted to instant-ngp's NeRF framework.
+* A pytorch implementation of [CCNeRF](https://github.com/ashawkey/CCNeRF), as described in [_Compressible-composable NeRF via Rank-residual Decomposition_](https://arxiv.org/abs/2205.14870).
+* [New!] An implementation of [D-NeRF](https://github.com/albertpumarola/D-NeRF) adapted to instant-ngp's framework, as described in [_D-NeRF: Neural Radiance Fields for Dynamic Scenes_](https://openaccess.thecvf.com/content/CVPR2021/papers/Pumarola_D-NeRF_Neural_Radiance_Fields_for_Dynamic_Scenes_CVPR_2021_paper.pdf).
 * Some experimental features in the NeRF framework (e.g., text-guided NeRF editig similar to [CLIP-NeRF](https://arxiv.org/abs/2112.05139)).
 * A GUI for training/visualizing NeRF!
 
-https://user-images.githubusercontent.com/25863658/155265815-c608254f-2f00-4664-a39d-e00eae51ca59.mp4
+### [Gallery](assets/gallery.md) | [Update Logs](assets/update_logs.md)
 
+Instant-ngp interactive training/rendering on lego:
+
+https://user-images.githubusercontent.com/25863658/176174011-e7b7c4ab-9b6f-4f65-9952-7eceafe609b7.mp4
+
+Also the first interactive deformable-nerf implementation:
+
+https://user-images.githubusercontent.com/25863658/175821784-63ba79f6-29be-47b5-b3fc-dab5282fce7a.mp4
+
+
+### Other related projects
+
+* [ngp_pl](https://github.com/kwea123/ngp_pl): PyTorch+CUDA trained with pytorch-lightning.
+
+* [JNeRF](https://github.com/Jittor/JNeRF): An NeRF benchmark based on Jittor.
+
+* [HashNeRF-pytorch](https://github.com/yashbhalgat/HashNeRF-pytorch): A pure PyTorch implementation.
+
+* [dreamfields-torch](https://github.com/ashawkey/dreamfields-torch): PyTorch+CUDA implementation of [_Zero-Shot Text-Guided Object Generation with Dream Fields_](https://arxiv.org/abs/2112.01455) based on this repository.
 
 # Install
 ```bash
@@ -57,12 +77,31 @@ For GPUs with lower architecture, `--tcnn` can still be used, but the speed will
 We use the same data format as instant-ngp, e.g., [armadillo](https://github.com/NVlabs/instant-ngp/blob/master/data/sdf/armadillo.obj) and [fox](https://github.com/NVlabs/instant-ngp/tree/master/data/nerf/fox). 
 Please download and put them under `./data`.
 
+We also support self-captured dataset and converting other formats (e.g., LLFF, Tanks&Temples, Mip-NeRF 360) to the nerf-compatible format, with details in the following code block.
+
+<details>
+  <summary> Supported datasets </summary>
+
+  * [nerf_synthetic](https://drive.google.com/drive/folders/128yBriW1IG_3NJ5Rp7APSTZsJqdJdfc1) 
+
+  * [Tanks&Temples](https://dl.fbaipublicfiles.com/nsvf/dataset/TanksAndTemple.zip): [[conversion script]](./scripts/tanks2nerf.py)
+
+  * [LLFF](https://drive.google.com/drive/folders/14boI-o5hGO9srnWaaogTU5_ji7wkX2S7): [[conversion script]](./scripts/llff2nerf.py)
+
+  * [Mip-NeRF 360](http://storage.googleapis.com/gresearch/refraw360/360_v2.zip): [[conversion script]](./scripts/llff2nerf.py)
+
+  * (dynamic) [D-NeRF](https://www.dropbox.com/s/0bf6fl0ye2vz3vr/data.zip?dl=0)
+
+  * (dynamic) [Hyper-NeRF](https://github.com/google/hypernerf/releases/tag/v0.1): [[conversion script]](./scripts/hyper2nerf.py)
+
+</details>
+
 First time running will take some time to compile the CUDA extensions.
 
 ```bash
-### Instant-ngp 
+### Instant-ngp NeRF
 # train with different backbones (with slower pytorch ray marching)
-# for the colmap dataset, the default dataset setting `--mode colmap --bound 2 --scale 0.33` is used.
+# for the colmap dataset, the default dataset setting `--bound 2 --scale 0.33` is used.
 python main_nerf.py data/fox --workspace trial_nerf # fp32 mode
 python main_nerf.py data/fox --workspace trial_nerf --fp16 # fp16 mode (pytorch amp)
 python main_nerf.py data/fox --workspace trial_nerf --fp16 --ff # fp16 mode + FFMLP (this repo's implementation)
@@ -93,37 +132,37 @@ python main_nerf.py data/fox --workspace trial_nerf -O --gui
 # test mode for GUI
 python main_nerf.py data/fox --workspace trial_nerf -O --gui --test
 
-# for the blender dataset, you should add `--mode blender --bound 1.0 --scale 0.8 --dt_gamma 0 --color_space linear`
-# --mode specifies dataset type ('blender' or 'colmap')
+# for the blender dataset, you should add `--bound 1.0 --scale 0.8 --dt_gamma 0`
 # --bound means the scene is assumed to be inside box[-bound, bound]
 # --scale adjusts the camera locaction to make sure it falls inside the above bounding box. 
 # --dt_gamma controls the adaptive ray marching speed, set to 0 turns it off.
-python main_nerf.py data/nerf_synthetic/lego --workspace trial_nerf -O --mode blender --bound 1.0 --scale 0.8 --dt_gamma 0 --color_space linear
-python main_nerf.py data/nerf_synthetic/lego --workspace trial_nerf -O --mode blender --bound 1.0 --scale 0.8 --dt_gamma 0 --color_space linear --gui
+python main_nerf.py data/nerf_synthetic/lego --workspace trial_nerf -O --bound 1.0 --scale 0.8 --dt_gamma 0
+python main_nerf.py data/nerf_synthetic/lego --workspace trial_nerf -O --bound 1.0 --scale 0.8 --dt_gamma 0 --gui
 
 # for the LLFF dataset, you should first convert it to nerf-compatible format:
-python llff2nerf.py data/nerf_llff_data/fern # by default it use full-resolution images, and write `transforms.json` to the folder
-python llff2nerf.py data/nerf_llff_data/fern --images images_4 --downscale 4 # if you prefer to use the low-resolution images
+python scripts/llff2nerf.py data/nerf_llff_data/fern # by default it use full-resolution images, and write `transforms.json` to the folder
+python scripts/llff2nerf.py data/nerf_llff_data/fern --images images_4 --downscale 4 # if you prefer to use the low-resolution images
 # then you can train as a colmap dataset (you'll need to tune the scale & bound if necessary):
 python main_nerf.py data/nerf_llff_data/fern --workspace trial_nerf -O
 python main_nerf.py data/nerf_llff_data/fern --workspace trial_nerf -O --gui
 
 # for the Tanks&Temples dataset, you should first convert it to nerf-compatible format:
-python tanks2nerf.py data/TanksAndTemple/Family # write `trainsforms_{split}.json` for [train, val, test]
+python scripts/tanks2nerf.py data/TanksAndTemple/Family # write `trainsforms_{split}.json` for [train, val, test]
 # then you can train as a blender dataset (you'll need to tune the scale & bound if necessary)
-python main_nerf.py data/TanksAndTemple/Family --workspace trial_nerf_family -O --mode blender --bound 1.0 --scale 0.33 --dt_gamma 0
-python main_nerf.py data/TanksAndTemple/Family --workspace trial_nerf_family -O --mode blender --bound 1.0 --scale 0.33 --dt_gamma 0 --gui
+python main_nerf.py data/TanksAndTemple/Family --workspace trial_nerf_family -O --bound 1.0 --scale 0.33 --dt_gamma 0
+python main_nerf.py data/TanksAndTemple/Family --workspace trial_nerf_family -O --bound 1.0 --scale 0.33 --dt_gamma 0 --gui
 
 # for custom dataset, you should:
 # 1. take a video / many photos from different views 
 # 2. put the video under a path like ./data/custom/video.mp4 or the images under ./data/custom/images/*.jpg.
 # 3. call the preprocess code: (should install ffmpeg and colmap first! refer to the file for more options)
-python colmap2nerf.py --video ./data/custom/video.mp4 --run_colmap # if use video
-python colmap2nerf.py --images ./data/custom/images/ --run_colmap # if use images
+python scripts/colmap2nerf.py --video ./data/custom/video.mp4 --run_colmap # if use video
+python scripts/colmap2nerf.py --images ./data/custom/images/ --run_colmap # if use images
+python scripts/colmap2nerf.py --video ./data/custom/video.mp4 --run_colmap --dynamic # if the scene is dynamic (for D-NeRF settings), add the time for each frame.
 # 4. it should create the transform.json, and you can train with: (you'll need to try with different scale & bound & dt_gamma to make the object correctly located in the bounding box and render fluently.)
 python main_nerf.py data/custom --workspace trial_nerf_custom -O --gui --scale 2.0 --bound 1.0 --dt_gamma 0.02
 
-### SDF
+### Instant-ngp SDF
 python main_sdf.py data/armadillo.obj --workspace trial_sdf
 python main_sdf.py data/armadillo.obj --workspace trial_sdf --fp16
 python main_sdf.py data/armadillo.obj --workspace trial_sdf --fp16 --ff
@@ -132,15 +171,33 @@ python main_sdf.py data/armadillo.obj --workspace trial_sdf --fp16 --tcnn
 python main_sdf.py data/armadillo.obj --workspace trial_sdf --fp16 --test
 
 ### TensoRF
-# almost the same as Instant-ngp, just replace the main script.
+# almost the same as Instant-ngp NeRF, just replace the main script.
 python main_tensoRF.py data/fox --workspace trial_tensoRF -O
-python main_tensoRF.py data/nerf_synthetic/lego --workspace trial_tensoRF -O --mode blender --bound 1.0 --scale 0.8 --dt_gamma 0 
+python main_tensoRF.py data/nerf_synthetic/lego --workspace trial_tensoRF -O --bound 1.0 --scale 0.8 --dt_gamma 0 
 
+### CCNeRF
+# training on single objects, turn on --error_map for better quality.
+python main_CCNeRF.py data/nerf_synthetic/chair --workspace trial_cc_chair -O --bound 1.0 --scale 0.67 --dt_gamma 0 --error_map
+python main_CCNeRF.py data/nerf_synthetic/ficus --workspace trial_cc_ficus -O --bound 1.0 --scale 0.67 --dt_gamma 0 --error_map
+python main_CCNeRF.py data/nerf_synthetic/hotdog --workspace trial_cc_hotdog -O --bound 1.0 --scale 0.67 --dt_gamma 0 --error_map
+# compose, use a larger bound and more samples per ray for better quality.
+python main_CCNeRF.py data/nerf_synthetic/hotdog --workspace trial_cc_hotdog -O --bound 2.0 --scale 0.67 --dt_gamma 0 --max_steps 2048 --test --compose
+# compose + gui, only about 1 FPS without dynamic resolution... just for quick verification of composition results.
+python main_CCNeRF.py data/nerf_synthetic/hotdog --workspace trial_cc_hotdog -O --bound 2.0 --scale 0.67 --dt_gamma 0 --test --compose --gui
+
+### D-NeRF
+# almost the same as Instant-ngp NeRF, just replace the main script.
+python main_dnerf.py data/dnerf/jumpingjacks --workspace trial_dnerf_jumpingjacks -O --bound 1.0 --scale 0.8 --dt_gamma 0
+python main_dnerf.py data/dnerf/jumpingjacks --workspace trial_dnerf_jumpingjacks -O --bound 1.0 --scale 0.8 --dt_gamma 0 --gui
+# for the hypernerf dataset, first convert it into nerf-compatible format:
+python scripts/hyper2nerf.py data/split-cookie --downscale 2 # will generate transforms*.json
+python main_dnerf.py data/split-cookie/ --workspace trial_dnerf_cookies -O --bound 1 --scale 0.3 --dt_gamma 0
 ```
 
 check the `scripts` directory for more provided examples.
 
 # Performance Reference
+
 Tested with the default settings on the Lego dataset.
 Here the speed refers to the `iterations per second` on a V100.
 
@@ -156,6 +213,7 @@ Here the speed refers to the `iterations per second` on a V100.
 | TensoRF (`-O --error_map`)     | train (30K steps)    | 35.84  |  14  | 2.8  |
 
 # Tips
+
 **Q**: How to choose the network backbone? 
 
 **A**: The `-O` flag which uses pytorch's native mixed precision is suitable for most cases. I don't find very significant improvement for `--tcnn` and `--ff`, and they require extra building. Also, some new features may only be available for the default `-O` mode.
@@ -176,49 +234,11 @@ An example for `bg_radius` in the [firekeeper](https://drive.google.com/file/d/1
 
 
 # Difference from the original implementation
+
 * Instead of assuming the scene is bounded in the unit box `[0, 1]` and centered at `(0.5, 0.5, 0.5)`, this repo assumes **the scene is bounded in box `[-bound, bound]`, and centered at `(0, 0, 0)`**. Therefore, the functionality of `aabb_scale` is replaced by `bound` here.
 * For the hashgrid encoder, this repo only implements the linear interpolation mode.
-* For TensoRF, we don't implement regularizations other than L1, and use `trunc_exp` as the density activation instead of `softplus`.
+* For TensoRF, we don't implement regularizations other than L1, and use `trunc_exp` as the density activation instead of `softplus`. The alpha mask pruning is replaced by the density grid sampler from instant-ngp, which shares the same logic for acceleration.
 
-
-# Update Log
-* 6.15: fixed a bug in raymarching, improved PSNR. Density thresh is directly applied on sigmas now (removed the empirical scaling factor).
-* 6.6: fix gridencoder to always use more accurate float32 inputs (coords), slightly improved performance (matched with tcnn).
-* 6.3: implement morton3D, misc improvements.
-* 5.29: fix a random bg color issue, add color_space option, better results for blender dataset.
-* 5.28: add a background model (set bg_radius > 0), which can suppress noises for real-world 360 datasets.
-* 5.21: expose more parameters to control, implement packbits.
-* 4.30: performance improvement (better lr_scheduler).
-* 4.25: add Tanks&Temples dataset support.
-* 4.18: add some experimental utils for random pose sampling and combined training with CLIP.
-* 4.13: add LLFF dataset support.
-* 4.13: also implmented tiled grid encoder according to this [issue](https://github.com/NVlabs/instant-ngp/issues/97).
-* 4.12: optimized dataloader, add error_map sampling (experimental, will slow down training since will only sample hard rays...)
-* 4.10: add Windows support.
-* 4.9: use 6D AABB instead of a single `bound` for more flexible rendering. More options in GUI to control the AABB and `dt_gamma` for adaptive ray marching.
-* 4.9: implemented multi-res density grid (cascade) and adaptive ray marching. Now the fox renders much faster!
-* 4.6: fixed TensorCP hyper-parameters.
-* 4.3: add `mark_untrained_grid` to prevent training on out-of-camera regions. Add custom dataset instructions.
-* 3.31: better compatibility for lower pytorch versions.
-* 3.29: fix training speed for the fox dataset (balanced speed with performance...).
-* 3.27: major update. basically improve performance, and support tensoRF model.
-* 3.22: reverted from pre-generating rays as it takes too much CPU memory, still the PSNR for Lego can reach ~33 now.
-* 3.14: fixed the precision related issue for `fp16` mode, and it renders much better quality. Added PSNR metric for NeRF.
-* 3.14: linearly scale `desired_resolution` with `bound` according to https://github.com/ashawkey/torch-ngp/issues/23.
-* 3.11: raymarching now supports supervising weights_sum (pixel alpha, or mask) directly, and bg_color is separated from CUDA to make it more flexible. Add an option to preload data into GPU.
-* 3.9: add fov for gui.
-* 3.1: add type='all' for blender dataset (load train + val + test data), which is the default behavior of instant-ngp.
-* 2.28: density_grid now stores density on the voxel center (with randomness), instead of on the grid. This should improve the rendering quality, such as the black strips in the lego scene.
-* 2.23: better support for the blender dataset.
-* 2.22: add GUI for NeRF training.
-* 2.21: add GUI for NeRF visualizing. 
-* 2.20: cuda raymarching is finally stable now!
-* 2.15: add the official [tinycudann](https://github.com/NVlabs/tiny-cuda-nn) as an alternative backend.    
-* 2.10: add cuda_ray, can train/infer faster, but performance is worse currently.
-* 2.6: add support for RGBA image.
-* 1.30: fixed atomicAdd() to use __half2 in HashGrid Encoder's backward, now the training speed with fp16 is as expected!
-* 1.29: finished an experimental binding of fully-fused MLP. replace SHEncoder with a CUDA implementation.
-* 1.26: add fp16 support for HashGrid Encoder (requires CUDA >= 10 and GPU ARCH >= 70 for now...).
 
 # Citation
 
@@ -230,8 +250,14 @@ If you find this work useful, a citation will be appreciated via:
     Note = {https://github.com/ashawkey/torch-ngp},
     Title = {Torch-ngp: a PyTorch implementation of instant-ngp}
 }
-```
 
+@article{tang2022compressible,
+    title = {Compressible-composable NeRF via Rank-residual Decomposition},
+    author = {Tang, Jiaxiang and Chen, Xiaokang and Wang, Jingbo and Zeng, Gang},
+    journal = {arXiv preprint arXiv:2205.14870},
+    year = {2022}
+}
+```
 
 # Acknowledgement
 
@@ -265,13 +291,11 @@ If you find this work useful, a citation will be appreciated via:
 
 * The official TensoRF [implementation](https://github.com/apchenstu/TensoRF):
     ```
-    @misc{TensoRF,
-        title={TensoRF: Tensorial Radiance Fields},
-        author={Anpei Chen and Zexiang Xu and Andreas Geiger and and Jingyi Yu and Hao Su},
-        year={2022},
-        eprint={2203.09517},
-        archivePrefix={arXiv},
-        primaryClass={cs.CV}
+    @article{TensoRF,
+      title={TensoRF: Tensorial Radiance Fields},
+      author={Chen, Anpei and Xu, Zexiang and Geiger, Andreas and Yu, Jingyi and Su, Hao},
+      journal={arXiv preprint arXiv:2203.09517},
+      year={2022}
     }
     ```
 

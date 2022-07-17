@@ -10,7 +10,7 @@
 
 import argparse
 import os
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 
 import numpy as np
 import json
@@ -27,16 +27,18 @@ def parse_args():
     parser.add_argument("--images", default="", help="input path to the images folder, ignored if --video is provided")
     parser.add_argument("--run_colmap", action="store_true", help="run colmap first on the image folder")
 
+    parser.add_argument("--dynamic", action="store_true", help="for dynamic scene, extraly save time calculated from frame index.")
+    parser.add_argument("--estimate_affine_shape", action="store_true", help="colmap SiftExtraction option, may yield better results, yet can only be run on CPU.")
+    parser.add_argument('--hold', type=int, default=8, help="hold out for validation every $ images")
+
     parser.add_argument("--video_fps", default=3)
     parser.add_argument("--time_slice", default="", help="time (in seconds) in the format t1,t2 within which the images should be generated from the video. eg: \"--time_slice '10,300'\" will generate images only from 10th second to 300th second of the video")
 
     parser.add_argument("--colmap_matcher", default="exhaustive", choices=["exhaustive","sequential","spatial","transitive","vocab_tree"], help="select which matcher colmap should use. sequential for videos, exhaustive for adhoc images")
-    parser.add_argument("--aabb_scale", default=2, choices=["1","2","4","8","16"], help="large scene scale factor. 1=scene fits in unit cube; power of 2 up to 16")
     parser.add_argument("--skip_early", default=0, help="skip this many images from the start")
 
     parser.add_argument("--colmap_text", default="colmap_text", help="input path to the colmap text files (set automatically if run_colmap is used)")
     parser.add_argument("--colmap_db", default="colmap.db", help="colmap database filename")
-    parser.add_argument("--out", default="transforms.json", help="output path")
 
     args = parser.parse_args()
     return args
@@ -76,6 +78,7 @@ def run_colmap(args):
     db = args.colmap_db
     images = args.images
     text = args.colmap_text
+    flag_EAS = int(args.estimate_affine_shape) # 0 / 1
 
     db_noext = str(Path(db).with_suffix(""))
     sparse = db_noext + "_sparse"
@@ -85,8 +88,8 @@ def run_colmap(args):
         sys.exit(1)
     if os.path.exists(db):
         os.remove(db)
-    do_system(f"colmap feature_extractor --ImageReader.camera_model OPENCV --SiftExtraction.estimate_affine_shape=true --SiftExtraction.domain_size_pooling=true --ImageReader.single_camera 1 --database_path {db} --image_path {images}")
-    do_system(f"colmap {args.colmap_matcher}_matcher --SiftMatching.guided_matching=true --database_path {db}")
+    do_system(f"colmap feature_extractor --ImageReader.camera_model OPENCV --SiftExtraction.estimate_affine_shape {flag_EAS} --SiftExtraction.domain_size_pooling {flag_EAS} --ImageReader.single_camera 1 --database_path {db} --image_path {images}")
+    do_system(f"colmap {args.colmap_matcher}_matcher --SiftMatching.guided_matching {flag_EAS} --database_path {db}")
     try:
         shutil.rmtree(sparse)
     except:
@@ -128,12 +131,15 @@ def qvec2rotmat(qvec):
     ])
 
 def rotmat(a, b):
-    a, b = a / np.linalg.norm(a), b / np.linalg.norm(b)
-    v = np.cross(a, b)
-    c = np.dot(a, b)
-    s = np.linalg.norm(v)
-    kmat = np.array([[0, -v[2], v[1]], [v[2], 0, -v[0]], [-v[1], v[0], 0]])
-    return np.eye(3) + kmat + kmat.dot(kmat) * ((1 - c) / (s ** 2 + 1e-10))
+	a, b = a / np.linalg.norm(a), b / np.linalg.norm(b)
+	v = np.cross(a, b)
+	c = np.dot(a, b)
+	# handle exception for the opposite direction input
+	if c < -1 + 1e-10:
+		return rotmat(a + np.random.uniform(-1e-2, 1e-2, 3), b)
+	s = np.linalg.norm(v)
+	kmat = np.array([[0, -v[2], v[1]], [v[2], 0, -v[0]], [-v[1], v[0], 0]])
+	return np.eye(3) + kmat + kmat.dot(kmat) * ((1 - c) / (s ** 2 + 1e-10))
 
 def closest_point_2_lines(oa, da, ob, db): # returns point closest to both rays of form o+t*d, and a weight factor that goes to 0 if the lines are parallel
     da = da / np.linalg.norm(da)
@@ -162,17 +168,13 @@ if __name__ == "__main__":
     
     args.colmap_db = os.path.join(root_dir, args.colmap_db)
     args.colmap_text = os.path.join(root_dir, args.colmap_text)
-    args.out = os.path.join(root_dir, args.out)
 
     if args.run_colmap:
         run_colmap(args)
 
-    AABB_SCALE = int(args.aabb_scale)
     SKIP_EARLY = int(args.skip_early)
     TEXT_FOLDER = args.colmap_text
-    OUT_PATH = args.out
 
-    print(f"outputting to {OUT_PATH}...")
     with open(os.path.join(TEXT_FOLDER, "cameras.txt"), "r") as f:
         angle_x = math.pi / 2
         for line in f:
@@ -228,7 +230,105 @@ if __name__ == "__main__":
 
     with open(os.path.join(TEXT_FOLDER, "images.txt"), "r") as f:
         i = 0
+
         bottom = np.array([0.0, 0.0, 0.0, 1.0]).reshape([1, 4])
+
+        frames = []
+
+        up = np.zeros(3)
+        for line in f:
+            line = line.strip()
+
+            if line[0] == "#":
+                continue
+
+            i = i + 1
+            if i < SKIP_EARLY*2:
+                continue
+
+            if i % 2 == 1:
+                elems = line.split(" ") # 1-4 is quat, 5-7 is trans, 9ff is filename (9, if filename contains no spaces)
+
+                name = '_'.join(elems[9:])
+                full_name = os.path.join(args.images, name)
+                rel_name = full_name[len(root_dir) + 1:]
+
+                b = sharpness(full_name)
+                # print(name, "sharpness =",b)
+
+                image_id = int(elems[0])
+                qvec = np.array(tuple(map(float, elems[1:5])))
+                tvec = np.array(tuple(map(float, elems[5:8])))
+                R = qvec2rotmat(-qvec)
+                t = tvec.reshape([3, 1])
+                m = np.concatenate([np.concatenate([R, t], 1), bottom], 0)
+                c2w = np.linalg.inv(m)
+                
+                c2w[0:3, 2] *= -1 # flip the y and z axis
+                c2w[0:3, 1] *= -1
+                c2w = c2w[[1, 0, 2, 3],:] # swap y and z
+                c2w[2, :] *= -1 # flip whole world upside down
+
+                up += c2w[0:3, 1]
+
+                frame = {
+                    "file_path": rel_name, 
+                    "sharpness": b, 
+                    "transform_matrix": c2w
+                }
+
+                frames.append(frame)
+
+    N = len(frames)
+    up = up / np.linalg.norm(up)
+
+    print("[INFO] up vector was", up)
+
+    R = rotmat(up, [0, 0, 1]) # rotate up vector to [0,0,1]
+    R = np.pad(R, [0, 1])
+    R[-1, -1] = 1
+
+    for f in frames:
+        f["transform_matrix"] = np.matmul(R, f["transform_matrix"]) # rotate up to be the z axis
+
+    # find a central point they are all looking at
+    print("[INFO] computing center of attention...")
+    totw = 0.0
+    totp = np.array([0.0, 0.0, 0.0])
+    for f in frames:
+        mf = f["transform_matrix"][0:3,:]
+        for g in frames:
+            mg = g["transform_matrix"][0:3,:]
+            p, weight = closest_point_2_lines(mf[:,3], mf[:,2], mg[:,3], mg[:,2])
+            if weight > 0.01:
+                totp += p * weight
+                totw += weight
+    totp /= totw
+    for f in frames:
+        f["transform_matrix"][0:3,3] -= totp
+    avglen = 0.
+    for f in frames:
+        avglen += np.linalg.norm(f["transform_matrix"][0:3,3])
+    avglen /= N
+    print("[INFO] avg camera distance from origin", avglen)
+    for f in frames:
+        f["transform_matrix"][0:3,3] *= 4.0 / avglen # scale to "nerf sized"
+
+    # sort frames by id
+    frames.sort(key=lambda d: d['file_path'])
+
+    # add time if scene is dynamic
+    if args.dynamic:
+        for i, f in enumerate(frames):
+            f['time'] = i / N
+
+    for f in frames:
+        f["transform_matrix"] = f["transform_matrix"].tolist()
+
+    # construct frames
+
+    def write_json(filename, frames):
+
         out = {
             "camera_angle_x": angle_x,
             "camera_angle_y": angle_y,
@@ -242,83 +342,27 @@ if __name__ == "__main__":
             "cy": cy,
             "w": w,
             "h": h,
-            "aabb_scale": AABB_SCALE,
-            "frames": [],
+            "frames": frames,
         }
 
-        up = np.zeros(3)
-        for line in f:
-            line = line.strip()
-            if line[0] == "#":
-                continue
-            i = i + 1
-            if i < SKIP_EARLY*2:
-                continue
-            if  i % 2 == 1:
-                elems = line.split(" ") # 1-4 is quat, 5-7 is trans, 9ff is filename (9, if filename contains no spaces)
+        output_path = os.path.join(root_dir, filename)
+        print(f"[INFO] writing {len(frames)} frames to {output_path}")
+        with open(output_path, "w") as outfile:
+            json.dump(out, outfile, indent=2)
 
-                name = '_'.join(elems[9:])
-                full_name = os.path.join(args.images, name)
-                rel_name = full_name[len(root_dir) + 1:]
+    # just one transforms.json, don't do data split
+    if args.hold <= 0:
 
-                b = sharpness(full_name)
-                print(name, "sharpness =",b)
+        write_json('transforms.json', frames)
+        
+    else:
+        all_ids = np.arange(N)
+        test_ids = all_ids[::args.hold]
+        train_ids = np.array([i for i in all_ids if i not in test_ids])
 
-                image_id = int(elems[0])
-                qvec = np.array(tuple(map(float, elems[1:5])))
-                tvec = np.array(tuple(map(float, elems[5:8])))
-                R = qvec2rotmat(-qvec)
-                t = tvec.reshape([3,1])
-                m = np.concatenate([np.concatenate([R, t], 1), bottom], 0)
-                c2w = np.linalg.inv(m)
-                c2w[0:3, 2] *= -1 # flip the y and z axis
-                c2w[0:3, 1] *= -1
-                c2w = c2w[[1, 0, 2, 3],:] # swap y and z
-                c2w[2, :] *= -1 # flip whole world upside down
+        frames_train = [f for i, f in enumerate(frames) if i in train_ids]
+        frames_test = [f for i, f in enumerate(frames) if i in test_ids]
 
-                up += c2w[0:3, 1]
-
-                frame = {"file_path" : rel_name, "sharpness" : b, "transform_matrix" : c2w}
-                out["frames"].append(frame)
-
-    nframes = len(out["frames"])
-    up = up / np.linalg.norm(up)
-    print("up vector was", up)
-    R = rotmat(up, [0, 0, 1]) # rotate up vector to [0,0,1]
-    R = np.pad(R, [0, 1])
-    R[-1, -1] = 1
-
-    for f in out["frames"]:
-        f["transform_matrix"] = np.matmul(R, f["transform_matrix"]) # rotate up to be the z axis
-
-    # find a central point they are all looking at
-    print("computing center of attention...")
-    totw = 0.0
-    totp = np.array([0.0, 0.0, 0.0])
-    for f in out["frames"]:
-        mf = f["transform_matrix"][0:3,:]
-        for g in out["frames"]:
-            mg = g["transform_matrix"][0:3,:]
-            p, w = closest_point_2_lines(mf[:,3], mf[:,2], mg[:,3], mg[:,2])
-            if w > 0.01:
-                totp += p * w
-                totw += w
-    totp /= totw
-    print(totp) # the cameras are looking at totp
-    for f in out["frames"]:
-        f["transform_matrix"][0:3,3] -= totp
-
-    avglen = 0.
-    for f in out["frames"]:
-        avglen += np.linalg.norm(f["transform_matrix"][0:3,3])
-    avglen /= nframes
-    print("avg camera distance from origin", avglen)
-    for f in out["frames"]:
-        f["transform_matrix"][0:3,3] *= 4.0 / avglen # scale to "nerf sized"
-
-    for f in out["frames"]:
-        f["transform_matrix"] = f["transform_matrix"].tolist()
-    print(nframes,"frames")
-    print(f"writing {OUT_PATH}")
-    with open(OUT_PATH, "w") as outfile:
-        json.dump(out, outfile, indent=2)
+        write_json('transforms_train.json', frames_train)
+        write_json('transforms_val.json', frames_test[::10])
+        write_json('transforms_test.json', frames_test)

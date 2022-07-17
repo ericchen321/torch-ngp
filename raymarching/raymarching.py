@@ -49,19 +49,19 @@ class _near_far_from_aabb(Function):
 near_far_from_aabb = _near_far_from_aabb.apply
 
 
-class _polar_from_ray(Function):
+class _sph_from_ray(Function):
     @staticmethod
     @custom_fwd(cast_inputs=torch.float32)
     def forward(ctx, rays_o, rays_d, radius):
-        ''' polar_from_ray, CUDA implementation
-        get polar coordinate on the background sphere from rays.
+        ''' sph_from_ray, CUDA implementation
+        get spherical coordinate on the background sphere from rays.
         Assume rays_o are inside the Sphere(radius).
         Args:
             rays_o: [N, 3]
             rays_d: [N, 3]
             radius: scalar, float
         Return:
-            coords: [N, 2], in [-1, 1], theta and phi on a sphere.
+            coords: [N, 2], in [-1, 1], theta and phi on a sphere. (further-surface)
         '''
         if not rays_o.is_cuda: rays_o = rays_o.cuda()
         if not rays_d.is_cuda: rays_d = rays_d.cuda()
@@ -73,11 +73,11 @@ class _polar_from_ray(Function):
 
         coords = torch.empty(N, 2, dtype=rays_o.dtype, device=rays_o.device)
 
-        _backend.polar_from_ray(rays_o, rays_d, radius, N, coords)
+        _backend.sph_from_ray(rays_o, rays_d, radius, N, coords)
 
         return coords
 
-polar_from_ray = _polar_from_ray.apply
+sph_from_ray = _sph_from_ray.apply
 
 
 class _morton3D(Function):
@@ -345,8 +345,8 @@ class _composite_rays(Function):
         Args:
             n_alive: int, number of alive rays
             n_step: int, how many steps we march
-            rays_alive: int, [N], the alive rays' IDs in N (N >= n_alive, but we only use first n_alive)
-            rays_t: float, [N], the alive rays' time, we only use the first n_alive.
+            rays_alive: int, [n_alive], the alive rays' IDs in N (N >= n_alive)
+            rays_t: float, [N], the alive rays' time
             sigmas: float, [n_alive * n_step,]
             rgbs: float, [n_alive * n_step, 3]
             deltas: float, [n_alive * n_step, 2], all generated points' deltas (here we record two deltas, the first is for RGB, the second for depth).
@@ -360,23 +360,3 @@ class _composite_rays(Function):
 
 
 composite_rays = _composite_rays.apply
-
-
-class _compact_rays(Function):
-    @staticmethod
-    @custom_fwd(cast_inputs=torch.float32)
-    def forward(ctx, n_alive, rays_alive, rays_alive_old, rays_t, rays_t_old, alive_counter):
-        ''' compact rays, remove dead rays and reallocate alive rays, to accelerate next ray marching.
-        Args:
-            n_alive: int, number of alive rays
-            rays_alive_old: int, [N]
-            rays_t_old: float, [N], dead rays are marked by rays_t < 0
-            alive_counter: int, [1], used to count remained alive rays.
-        In-place Outputs:
-            rays_alive: int, [N]
-            rays_t: float, [N]
-        '''    
-        _backend.compact_rays(n_alive, rays_alive, rays_alive_old, rays_t, rays_t_old, alive_counter)
-        return tuple()
-
-compact_rays = _compact_rays.apply

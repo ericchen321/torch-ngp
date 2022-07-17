@@ -147,7 +147,7 @@ __global__ void kernel_near_far_from_aabb(
 }
 
 
-void near_far_from_aabb(at::Tensor rays_o, at::Tensor rays_d, at::Tensor aabb, const uint32_t N, const float min_near, at::Tensor nears, at::Tensor fars) {
+void near_far_from_aabb(const at::Tensor rays_o, const at::Tensor rays_d, const at::Tensor aabb, const uint32_t N, const float min_near, at::Tensor nears, at::Tensor fars) {
 
     static constexpr uint32_t N_THREAD = 128;
 
@@ -162,7 +162,7 @@ void near_far_from_aabb(at::Tensor rays_o, at::Tensor rays_d, at::Tensor aabb, c
 // radius: float
 // coords: [N, 2]
 template <typename scalar_t>
-__global__ void kernel_polar_from_ray(
+__global__ void kernel_sph_from_ray(
     const scalar_t * __restrict__ rays_o,
     const scalar_t * __restrict__ rays_d,
     const float radius,
@@ -200,13 +200,13 @@ __global__ void kernel_polar_from_ray(
 }
 
 
-void polar_from_ray(at::Tensor rays_o, at::Tensor rays_d, const float radius, const uint32_t N, at::Tensor coords) {
+void sph_from_ray(const at::Tensor rays_o, const at::Tensor rays_d, const float radius, const uint32_t N, at::Tensor coords) {
 
     static constexpr uint32_t N_THREAD = 128;
 
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(
-    rays_o.scalar_type(), "polar_from_ray", ([&] {
-        kernel_polar_from_ray<<<div_round_up(N, N_THREAD), N_THREAD>>>(rays_o.data_ptr<scalar_t>(), rays_d.data_ptr<scalar_t>(), radius, N, coords.data_ptr<scalar_t>());
+    rays_o.scalar_type(), "sph_from_ray", ([&] {
+        kernel_sph_from_ray<<<div_round_up(N, N_THREAD), N_THREAD>>>(rays_o.data_ptr<scalar_t>(), rays_d.data_ptr<scalar_t>(), radius, N, coords.data_ptr<scalar_t>());
     }));
 }
 
@@ -228,7 +228,7 @@ __global__ void kernel_morton3D(
 }
 
 
-void morton3D(at::Tensor coords, const uint32_t N, at::Tensor indices) {
+void morton3D(const at::Tensor coords, const uint32_t N, at::Tensor indices) {
     static constexpr uint32_t N_THREAD = 128;
     kernel_morton3D<<<div_round_up(N, N_THREAD), N_THREAD>>>(coords.data_ptr<int>(), N, indices.data_ptr<int>());
 }
@@ -256,7 +256,7 @@ __global__ void kernel_morton3D_invert(
 }
 
 
-void morton3D_invert(at::Tensor indices, const uint32_t N, at::Tensor coords) {
+void morton3D_invert(const at::Tensor indices, const uint32_t N, at::Tensor coords) {
     static constexpr uint32_t N_THREAD = 128;
     kernel_morton3D_invert<<<div_round_up(N, N_THREAD), N_THREAD>>>(indices.data_ptr<int>(), N, coords.data_ptr<int>());
 }
@@ -291,7 +291,7 @@ __global__ void kernel_packbits(
 }
 
 
-void packbits(at::Tensor grid, const uint32_t N, const float density_thresh, at::Tensor bitfield) {
+void packbits(const at::Tensor grid, const uint32_t N, const float density_thresh, at::Tensor bitfield) {
 
     static constexpr uint32_t N_THREAD = 128;
 
@@ -339,6 +339,7 @@ __global__ void kernel_march_rays_train(
     const float dx = rays_d[0], dy = rays_d[1], dz = rays_d[2];
     const float rdx = 1 / dx, rdy = 1 / dy, rdz = 1 / dz;
     const float rH = 1 / (float)H;
+    const float H3 = H * H * H;
 
     const float near = nears[n];
     const float far = fars[n];
@@ -378,7 +379,7 @@ __global__ void kernel_march_rays_train(
         const int ny = clamp(0.5 * (y * mip_rbound + 1) * H, 0.0f, (float)(H - 1));
         const int nz = clamp(0.5 * (z * mip_rbound + 1) * H, 0.0f, (float)(H - 1));
 
-        const uint32_t index = level * H * H * H + __morton3D(nx, ny, nz);
+        const uint32_t index = level * H3 + __morton3D(nx, ny, nz);
         const bool occ = grid[index / 8] & (1 << (index % 8));
 
         // if occpuied, advance a small step, and write to output
@@ -447,7 +448,7 @@ __global__ void kernel_march_rays_train(
         const int nz = clamp(0.5 * (z * mip_rbound + 1) * H, 0.0f, (float)(H - 1));
 
         // query grid
-        const uint32_t index = level * H * H * H + __morton3D(nx, ny, nz);
+        const uint32_t index = level * H3 + __morton3D(nx, ny, nz);
         const bool occ = grid[index / 8] & (1 << (index % 8));
 
         // if occpuied, advance a small step, and write to output
@@ -482,7 +483,7 @@ __global__ void kernel_march_rays_train(
     }
 }
 
-void march_rays_train(at::Tensor rays_o, at::Tensor rays_d, at::Tensor grid, const float bound, const float dt_gamma, const uint32_t max_steps, const uint32_t N, const uint32_t C, const uint32_t H, const uint32_t M, at::Tensor nears, at::Tensor fars, at::Tensor xyzs, at::Tensor dirs, at::Tensor deltas, at::Tensor rays, at::Tensor counter, const uint32_t perturb) {
+void march_rays_train(const at::Tensor rays_o, const at::Tensor rays_d, const at::Tensor grid, const float bound, const float dt_gamma, const uint32_t max_steps, const uint32_t N, const uint32_t C, const uint32_t H, const uint32_t M, const at::Tensor nears, const at::Tensor fars, at::Tensor xyzs, at::Tensor dirs, at::Tensor deltas, at::Tensor rays, at::Tensor counter, const uint32_t perturb) {
 
     static constexpr uint32_t N_THREAD = 128;
     pcg32 rng = pcg32{(uint64_t)42}; // hard coded random seed
@@ -546,20 +547,19 @@ __global__ void kernel_composite_rays_train_forward(
         const scalar_t alpha = 1.0f - __expf(- sigmas[0] * deltas[0]);
         const scalar_t weight = alpha * T;
 
-        // minimal remained transmittence
-        // NOTE: uncomment it won't affect instant-ngp, but totally breaks TensoRF...
-        //if (weight < 1e-4f) break;
-
         r += weight * rgbs[0];
         g += weight * rgbs[1];
         b += weight * rgbs[2];
-
+        
         t += deltas[1]; // real delta
         d += weight * t;
-
+        
         ws += weight;
-
+        
         T *= 1.0f - alpha;
+
+        // minimal remained transmittence
+        if (T < 1e-4f) break;
 
         //printf("[n=%d] num_steps=%d, alpha=%f, w=%f, T=%f, sum_dt=%f, d=%f\n", n, step, alpha, weight, T, sum_delta, d);
 
@@ -582,7 +582,7 @@ __global__ void kernel_composite_rays_train_forward(
 }
 
 
-void composite_rays_train_forward(at::Tensor sigmas, at::Tensor rgbs, at::Tensor deltas, at::Tensor rays, const uint32_t M, const uint32_t N, at::Tensor weights_sum, at::Tensor depth, at::Tensor image) {
+void composite_rays_train_forward(const at::Tensor sigmas, const at::Tensor rgbs, const at::Tensor deltas, const at::Tensor rays, const uint32_t M, const uint32_t N, at::Tensor weights_sum, at::Tensor depth, at::Tensor image) {
 
     static constexpr uint32_t N_THREAD = 128;
 
@@ -650,8 +650,6 @@ __global__ void kernel_composite_rays_train_backward(
         const scalar_t alpha = 1.0f - __expf(- sigmas[0] * deltas[0]);
         const scalar_t weight = alpha * T;
 
-        //if (weight < 1e-4f) break;
-
         r += weight * rgbs[0];
         g += weight * rgbs[1];
         b += weight * rgbs[2];
@@ -659,6 +657,10 @@ __global__ void kernel_composite_rays_train_backward(
 
         T *= 1.0f - alpha;
 
+        // minimal remained transmittence
+        if (T < 1e-4f) break;
+
+        // check https://note.kiui.moe/others/nerf_gradient/ for the gradient calculation.
         // write grad_rgbs
         grad_rgbs[0] = grad_image[0] * weight;
         grad_rgbs[1] = grad_image[1] * weight;
@@ -669,7 +671,7 @@ __global__ void kernel_composite_rays_train_backward(
             grad_image[0] * (T * rgbs[0] - (r_final - r)) + 
             grad_image[1] * (T * rgbs[1] - (g_final - g)) + 
             grad_image[2] * (T * rgbs[2] - (b_final - b)) +
-            grad_weights_sum[0] * (T - (ws_final - ws))
+            grad_weights_sum[0] * (1 - ws_final)
         );
 
         //printf("[n=%d] num_steps=%d, T=%f, grad_sigmas=%f, r_final=%f, r=%f\n", n, step, T, grad_sigmas[0], r_final, r);
@@ -686,7 +688,7 @@ __global__ void kernel_composite_rays_train_backward(
 }
 
 
-void composite_rays_train_backward(at::Tensor grad_weights_sum, at::Tensor grad_image, at::Tensor sigmas, at::Tensor rgbs, at::Tensor deltas, at::Tensor rays, at::Tensor weights_sum, at::Tensor image, const uint32_t M, const uint32_t N, at::Tensor grad_sigmas, at::Tensor grad_rgbs) {
+void composite_rays_train_backward(const at::Tensor grad_weights_sum, const at::Tensor grad_image, const at::Tensor sigmas, const at::Tensor rgbs, const at::Tensor deltas, const at::Tensor rays, const at::Tensor weights_sum, const at::Tensor image, const uint32_t M, const uint32_t N, at::Tensor grad_sigmas, at::Tensor grad_rgbs) {
 
     static constexpr uint32_t N_THREAD = 128;
 
@@ -723,20 +725,21 @@ __global__ void kernel_march_rays(
     if (n >= n_alive) return;
 
     const int index = rays_alive[n]; // ray id
-    float t = rays_t[n]; // current ray's t
-
+    
     // locate
     rays_o += index * 3;
     rays_d += index * 3;
     xyzs += n * n_step * 3;
     dirs += n * n_step * 3;
     deltas += n * n_step * 2;
-
+    
     const float ox = rays_o[0], oy = rays_o[1], oz = rays_o[2];
     const float dx = rays_d[0], dy = rays_d[1], dz = rays_d[2];
     const float rdx = 1 / dx, rdy = 1 / dy, rdz = 1 / dz;
     const float rH = 1 / (float)H;
-
+    const float H3 = H * H * H;
+    
+    float t = rays_t[index]; // current ray's t
     const float near = nears[index], far = fars[index];
 
     const float dt_min = 2 * SQRT3() / max_steps;
@@ -772,7 +775,7 @@ __global__ void kernel_march_rays(
         const int ny = clamp(0.5 * (y * mip_rbound + 1) * H, 0.0f, (float)(H - 1));
         const int nz = clamp(0.5 * (z * mip_rbound + 1) * H, 0.0f, (float)(H - 1));
 
-        const uint32_t index = level * H * H * H + __morton3D(nx, ny, nz);
+        const uint32_t index = level * H3 + __morton3D(nx, ny, nz);
         const bool occ = grid[index / 8] & (1 << (index % 8));
 
         // if occpuied, advance a small step, and write to output
@@ -811,7 +814,7 @@ __global__ void kernel_march_rays(
 }
 
 
-void march_rays(const uint32_t n_alive, const uint32_t n_step, at::Tensor rays_alive, at::Tensor rays_t, at::Tensor rays_o, at::Tensor rays_d, const float bound, const float dt_gamma, const uint32_t max_steps, const uint32_t C, const uint32_t H, at::Tensor grid, at::Tensor near, at::Tensor far, at::Tensor xyzs, at::Tensor dirs, at::Tensor deltas, const uint32_t perturb) {
+void march_rays(const uint32_t n_alive, const uint32_t n_step, const at::Tensor rays_alive, const at::Tensor rays_t, const at::Tensor rays_o, const at::Tensor rays_d, const float bound, const float dt_gamma, const uint32_t max_steps, const uint32_t C, const uint32_t H, const at::Tensor grid, const at::Tensor near, const at::Tensor far, at::Tensor xyzs, at::Tensor dirs, at::Tensor deltas, const uint32_t perturb) {
     static constexpr uint32_t N_THREAD = 128;
     pcg32 rng = pcg32{(uint64_t)perturb};
 
@@ -826,7 +829,7 @@ template <typename scalar_t>
 __global__ void kernel_composite_rays(
     const uint32_t n_alive, 
     const uint32_t n_step, 
-    const int* __restrict__ rays_alive, 
+    int* rays_alive, 
     scalar_t* rays_t, 
     const scalar_t* __restrict__ sigmas, 
     const scalar_t* __restrict__ rgbs, 
@@ -837,16 +840,18 @@ __global__ void kernel_composite_rays(
     if (n >= n_alive) return;
 
     const int index = rays_alive[n]; // ray id
-    scalar_t t = rays_t[n]; // current ray's t
-
+    
     // locate 
     sigmas += n * n_step;
     rgbs += n * n_step * 3;
     deltas += n * n_step * 2;
-
+    
+    rays_t += index;
     weights_sum += index;
     depth += index;
     image += index * 3;
+
+    scalar_t t = rays_t[0]; // current ray's t
     
     scalar_t weight_sum = weights_sum[0];
     scalar_t d = depth[0];
@@ -882,7 +887,6 @@ __global__ void kernel_composite_rays(
         //printf("[n=%d] num_steps=%d, alpha=%f, w=%f, T=%f, sum_dt=%f, d=%f\n", n, step, alpha, weight, T, sum_delta, d);
 
         // ray is terminated if T is too small
-        // NOTE: can significantly accelerate inference!
         if (T < 1e-4) break;
 
         // locate
@@ -894,11 +898,11 @@ __global__ void kernel_composite_rays(
 
     //printf("[n=%d] rgb=(%f, %f, %f), d=%f\n", n, r, g, b, d);
 
-    // rays_t = -1 means ray is terminated early.
+    // rays_alive = -1 means ray is terminated early.
     if (step < n_step) {
-        rays_t[n] = -1;
+        rays_alive[n] = -1;
     } else {
-        rays_t[n] = t;
+        rays_t[0] = t;
     }
 
     weights_sum[0] = weight_sum; // this is the thing I needed!
@@ -909,40 +913,10 @@ __global__ void kernel_composite_rays(
 }
 
 
-void composite_rays(const uint32_t n_alive, const uint32_t n_step, at::Tensor rays_alive, at::Tensor rays_t, at::Tensor sigmas, at::Tensor rgbs, at::Tensor deltas, at::Tensor weights, at::Tensor depth, at::Tensor image) {
+void composite_rays(const uint32_t n_alive, const uint32_t n_step, at::Tensor rays_alive, at::Tensor rays_t, const at::Tensor sigmas, const at::Tensor rgbs, const at::Tensor deltas, at::Tensor weights, at::Tensor depth, at::Tensor image) {
     static constexpr uint32_t N_THREAD = 128;
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(
     image.scalar_type(), "composite_rays", ([&] {
         kernel_composite_rays<<<div_round_up(n_alive, N_THREAD), N_THREAD>>>(n_alive, n_step, rays_alive.data_ptr<int>(), rays_t.data_ptr<scalar_t>(), sigmas.data_ptr<scalar_t>(), rgbs.data_ptr<scalar_t>(), deltas.data_ptr<scalar_t>(), weights.data_ptr<scalar_t>(), depth.data_ptr<scalar_t>(), image.data_ptr<scalar_t>());
-    }));
-}
-
-
-template <typename scalar_t>
-__global__ void kernel_compact_rays(
-    const uint32_t n_alive, 
-    int* rays_alive, 
-    const int* __restrict__ rays_alive_old, 
-    scalar_t* rays_t, 
-    const scalar_t* __restrict__ rays_t_old, 
-    int* alive_counter
-) {
-    const uint32_t n = threadIdx.x + blockIdx.x * blockDim.x;
-    if (n >= n_alive) return;
-
-    // rays_t_old[n] < 0 means ray died in last composite kernel.
-    if (rays_t_old[n] >= 0) {
-        const int index = atomicAdd(alive_counter, 1);
-        rays_alive[index] = rays_alive_old[n];
-        rays_t[index] = rays_t_old[n];
-    }
-}
-
-
-void compact_rays(const uint32_t n_alive, at::Tensor rays_alive, at::Tensor rays_alive_old, at::Tensor rays_t, at::Tensor rays_t_old, at::Tensor alive_counter) {
-    static constexpr uint32_t N_THREAD = 128;
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(
-    rays_t.scalar_type(), "compact_rays", ([&] {
-        kernel_compact_rays<<<div_round_up(n_alive, N_THREAD), N_THREAD>>>(n_alive, rays_alive.data_ptr<int>(), rays_alive_old.data_ptr<int>(), rays_t.data_ptr<scalar_t>(), rays_t_old.data_ptr<scalar_t>(), alive_counter.data_ptr<int>());
     }));
 }

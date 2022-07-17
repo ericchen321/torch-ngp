@@ -393,9 +393,9 @@ class Trainer(object):
         if self.opt.color_space == 'linear':
             images[..., :3] = srgb_to_linear(images[..., :3])
 
-        if self.model.bg_radius > 0:
+        if C == 3 or self.model.bg_radius > 0:
             bg_color = 1
-        # train with random background color if not using a bg model.
+        # train with random background color if not using a bg model and has alpha channel.
         else:
             #bg_color = torch.ones(3, device=self.device) # [3], fixed white background
             #bg_color = torch.rand(3, device=self.device) # [3], frame-wise random.
@@ -559,11 +559,6 @@ class Trainer(object):
         self.model.eval()
         with torch.no_grad():
 
-            # update grid
-            if self.model.cuda_ray:
-                with torch.cuda.amp.autocast(enabled=self.fp16):
-                    self.model.update_extra_state()
-
             for i, data in enumerate(loader):
                 
                 with torch.cuda.amp.autocast(enabled=self.fp16):
@@ -596,6 +591,10 @@ class Trainer(object):
         
         loader = iter(train_loader)
 
+        # mark untrained grid
+        if self.global_step == 0:
+            self.model.mark_untrained_grid(train_loader._data.poses, train_loader._data.intrinsics)
+
         for _ in range(step):
             
             # mimic an infinite loop dataloader (in case the total dataset is smaller than step)
@@ -605,13 +604,8 @@ class Trainer(object):
                 loader = iter(train_loader)
                 data = next(loader)
 
-            # mark untrained grid
-            if self.global_step == 0:
-                self.model.mark_untrained_grid(train_loader._data.poses, train_loader._data.intrinsics)
-                self.error_map = train_loader._data.error_map
-
             # update grid every 16 steps
-            if self.model.cuda_ray and self.global_step % 16 == 0:
+            if self.model.cuda_ray and self.global_step % self.opt.update_extra_interval == 0:
                 with torch.cuda.amp.autocast(enabled=self.fp16):
                     self.model.update_extra_state()
             
@@ -725,7 +719,7 @@ class Trainer(object):
         for data in loader:
             
             # update grid every 16 steps
-            if self.model.cuda_ray and self.global_step % 16 == 0:
+            if self.model.cuda_ray and self.global_step % self.opt.update_extra_interval == 0:
                 with torch.cuda.amp.autocast(enabled=self.fp16):
                     self.model.update_extra_state()
                     
@@ -808,11 +802,6 @@ class Trainer(object):
 
         with torch.no_grad():
             self.local_step = 0
-
-            # update grid
-            if self.model.cuda_ray:
-                with torch.cuda.amp.autocast(enabled=self.fp16):
-                    self.model.update_extra_state()
 
             for data in loader:    
                 self.local_step += 1
@@ -941,6 +930,10 @@ class Trainer(object):
 
                     state['model'] = self.model.state_dict()
 
+                    # we don't consider continued training from the best ckpt, so we discard the unneeded density_grid to save some storage (especially important for dnerf)
+                    if 'density_grid' in state['model']:
+                        del state['model']['density_grid']
+
                     if self.ema is not None:
                         self.ema.restore()
                     
@@ -989,7 +982,7 @@ class Trainer(object):
         self.global_step = checkpoint_dict['global_step']
         self.log(f"[INFO] load at epoch {self.epoch}, global step {self.global_step}")
         
-        if self.optimizer and  'optimizer' in checkpoint_dict:
+        if self.optimizer and 'optimizer' in checkpoint_dict:
             try:
                 self.optimizer.load_state_dict(checkpoint_dict['optimizer'])
                 self.log("[INFO] loaded optimizer.")

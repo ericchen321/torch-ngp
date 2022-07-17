@@ -20,14 +20,16 @@ if __name__ == '__main__':
     parser.add_argument('--seed', type=int, default=0)
 
     ### training options
-    parser.add_argument('--iters', type=int, default=40000, help="training iters")
+    parser.add_argument('--iters', type=int, default=30000, help="training iters")
     parser.add_argument('--lr', type=float, default=1e-2, help="initial learning rate")
     parser.add_argument('--ckpt', type=str, default='latest')
     parser.add_argument('--num_rays', type=int, default=4096, help="num rays sampled per image for each training step")
     parser.add_argument('--cuda_ray', action='store_true', help="use CUDA raymarching instead of pytorch")
-    parser.add_argument('--num_steps', type=int, default=512, help="num steps sampled per ray (only valid when not using --cuda_ray)")
-    parser.add_argument('--upsample_steps', type=int, default=0, help="num steps up-sampled per ray (only valid when not using --cuda_ray)")
-    parser.add_argument('--max_ray_batch', type=int, default=4096, help="batch size of rays at inference to avoid OOM (only valid when not using --cuda_ray)")
+    parser.add_argument('--max_steps', type=int, default=1024, help="max num steps sampled per ray (only valid when using --cuda_ray)")
+    parser.add_argument('--num_steps', type=int, default=512, help="num steps sampled per ray (only valid when NOT using --cuda_ray)")
+    parser.add_argument('--upsample_steps', type=int, default=0, help="num steps up-sampled per ray (only valid when NOT using --cuda_ray)")
+    parser.add_argument('--update_extra_interval', type=int, default=16, help="iter interval to update extra status (only valid when using --cuda_ray)")
+    parser.add_argument('--max_ray_batch', type=int, default=4096, help="batch size of rays at inference to avoid OOM (only valid when NOT using --cuda_ray)")
 
     ### network backbone options
     parser.add_argument('--fp16', action='store_true', help="use amp mixed precision training")
@@ -35,12 +37,12 @@ if __name__ == '__main__':
     parser.add_argument('--tcnn', action='store_true', help="use TCNN backend")
 
     ### dataset options
-    parser.add_argument('--mode', type=str, default='colmap', help="dataset mode, supports (colmap, blender)")
     parser.add_argument('--color_space', type=str, default='srgb', help="Color space, supports (linear, srgb)")
     parser.add_argument('--preload', action='store_true', help="preload all data into GPU, accelerate training but use more GPU memory")
     # (the default value is for the fox dataset)
     parser.add_argument('--bound', type=float, default=2, help="assume the scene is bounded in box[-bound, bound]^3, if > 1, will invoke adaptive ray marching.")
     parser.add_argument('--scale', type=float, default=0.33, help="scale camera location into box[-bound, bound]^3")
+    parser.add_argument('--offset', type=float, nargs='*', default=[0, 0, 0], help="offset of camera location")
     parser.add_argument('--dt_gamma', type=float, default=1/128, help="dt_gamma (>=0) for adaptive ray marching. set to 0 to disable, >0 to accelerate rendering (but usually with worse quality)")
     parser.add_argument('--min_near', type=float, default=0.2, help="minimum near distance for camera")
     parser.add_argument('--density_thresh', type=float, default=10, help="threshold for density grid to be occupied")
@@ -110,7 +112,7 @@ if __name__ == '__main__':
         else:
             test_loader = NeRFDataset(opt, device=device, type='test').dataloader()
 
-            if opt.mode == 'blender':
+            if test_loader.has_gt:
                 trainer.evaluate(test_loader) # blender has gt, so evaluate it.
             else:
                 trainer.test(test_loader) # colmap doesn't have gt, so just test.
@@ -121,7 +123,7 @@ if __name__ == '__main__':
 
         optimizer = lambda model: torch.optim.Adam(model.get_params(opt.lr), betas=(0.9, 0.99), eps=1e-15)
 
-        train_loader = NeRFDataset(opt, device=device, type='trainval').dataloader()
+        train_loader = NeRFDataset(opt, device=device, type='train').dataloader()
 
         # decay to 0.1 * init_lr at last iter step
         scheduler = lambda optimizer: optim.lr_scheduler.LambdaLR(optimizer, lambda iter: 0.1 ** min(iter / opt.iters, 1))
@@ -129,9 +131,7 @@ if __name__ == '__main__':
         trainer = Trainer('ngp', opt, model, device=device, workspace=opt.workspace, optimizer=optimizer, criterion=criterion, ema_decay=0.95, fp16=opt.fp16, lr_scheduler=scheduler, scheduler_update_every_step=True, metrics=[PSNRMeter()], use_checkpoint=opt.ckpt, eval_interval=50)
 
         if opt.gui:
-            trainer.train_loader = train_loader # attach dataloader to trainer
-
-            gui = NeRFGUI(opt, trainer)
+            gui = NeRFGUI(opt, trainer, train_loader)
             gui.render()
         
         else:
@@ -143,7 +143,7 @@ if __name__ == '__main__':
             # also test
             test_loader = NeRFDataset(opt, device=device, type='test').dataloader()
             
-            if opt.mode == 'blender':
+            if test_loader.has_gt:
                 trainer.evaluate(test_loader) # blender has gt, so evaluate it.
             else:
                 trainer.test(test_loader) # colmap doesn't have gt, so just test.
