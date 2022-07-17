@@ -1,0 +1,11 @@
+ninja
+trimesh
+opencv-python
+tensorboardX
+torch==1.10.0
+pandas
+tqdm
+matplotlib
+rich
+packaging
+scipy
