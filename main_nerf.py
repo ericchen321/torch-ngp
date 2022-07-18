@@ -105,9 +105,10 @@ if __name__ == '__main__':
 
         trainer = Trainer('ngp', opt, model, device=device, workspace=opt.workspace, criterion=criterion, fp16=opt.fp16, metrics=[PSNRMeter()], use_checkpoint=opt.ckpt)
 
-        # if opt.gui:
+        if opt.gui:
         #     gui = NeRFGUI(opt, trainer)
         #     gui.render()
+            pass
         
         else:
             test_loader = NeRFDataset(opt, device=device, type='test').dataloader()
@@ -130,9 +131,10 @@ if __name__ == '__main__':
 
         trainer = Trainer('ngp', opt, model, device=device, workspace=opt.workspace, optimizer=optimizer, criterion=criterion, ema_decay=0.95, fp16=opt.fp16, lr_scheduler=scheduler, scheduler_update_every_step=True, metrics=[PSNRMeter()], use_checkpoint=opt.ckpt, eval_interval=50)
 
-        # if opt.gui:
+        if opt.gui:
         #     gui = NeRFGUI(opt, trainer, train_loader)
         #     gui.render()
+            pass
         
         else:
             valid_loader = NeRFDataset(opt, device=device, type='val', downscale=1).dataloader()
