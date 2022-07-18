@@ -19,7 +19,7 @@ else
   exit 1
 fi
 
-python main_nerf.py $DATA_DIR/$SCENE \
+python main_nerf.py $DATA_DIR/ \
     --workspace workspace/${CONFIG_NAME}_${SCENE} \
     --bound 1.0 \
     --scale 0.8 \
