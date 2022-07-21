@@ -14,6 +14,9 @@ if __name__ == '__main__':
     parser.add_argument('--fp16', action='store_true', help="use amp mixed precision training")
     parser.add_argument('--ff', action='store_true', help="use fully-fused MLP")
     parser.add_argument('--tcnn', action='store_true', help="use TCNN backend")
+    # Eric: add a few more params
+    parser.add_argument('--iters', type=int, default=2000, help="training iters")
+    parser.add_argument('--resolution', type=int, default=512)
 
     opt = parser.parse_args()
     print(opt)
@@ -34,7 +37,7 @@ if __name__ == '__main__':
 
     if opt.test:
         trainer = Trainer('ngp', model, workspace=opt.workspace, fp16=opt.fp16, use_checkpoint='best', eval_interval=1)
-        trainer.save_mesh(os.path.join(opt.workspace, 'results', 'output.ply'), 1024)
+        trainer.save_mesh(os.path.join(opt.workspace, 'results', 'output.ply'), opt.resolution)
 
     else:
         from sdf.provider import SDFDataset
@@ -57,7 +60,8 @@ if __name__ == '__main__':
 
         trainer = Trainer('ngp', model, workspace=opt.workspace, optimizer=optimizer, criterion=criterion, ema_decay=0.95, fp16=opt.fp16, lr_scheduler=scheduler, use_checkpoint='latest', eval_interval=1)
 
-        trainer.train(train_loader, valid_loader, 20)
+        max_epoch = np.ceil(opt.iters / len(train_loader)).astype(np.int32)
+        trainer.train(train_loader, valid_loader, max_epoch)
 
         # also test
-        trainer.save_mesh(os.path.join(opt.workspace, 'results', 'output.ply'), 1024)
+        trainer.save_mesh(os.path.join(opt.workspace, 'results', 'output.ply'), opt.resolution)
