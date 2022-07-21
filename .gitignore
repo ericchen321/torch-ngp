@@ -15,3 +15,5 @@ tensorf/
 
 workspace/
 workspace
+
+slurm-*.out
